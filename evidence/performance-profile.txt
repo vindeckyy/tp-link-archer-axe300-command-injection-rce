@@ -1,0 +1,149 @@
+=== Measured performance profile of the unit under test ===
+Device : TP-Link Archer AXE300 v1.0, firmware 1.0.11 Build 20241115
+Date   : 2026-10-24
+Host   : a LAN client on 192.168.0.0/24, wireless, served by this router
+
+This file is not part of the vulnerability disclosure. It is here because the
+root access obtained through the injection makes the platform's real limits
+measurable, and because "the router feels slow" deserves an answer based on
+numbers rather than folklore.
+
+Method: readings taken over the same channel as the rest of this repository.
+Latency figures come from the LAN client; throughput from a 50 MB transfer
+through the router to a public CDN endpoint (the router's own WAN link is
+10 Gb/s full duplex, so it is never the bottleneck).
+
+
+--- 1. CPU: not the bottleneck ------------------------------------------------------
+
+    /proc/stat delta over 6 s:
+        user 0.8%   system 1.5%   idle 97.7%   iowait 0%   softirq 0.04%
+
+    Load average 2.59 / 2.45 / 2.32 on a 2-core box, yet CPU 97.7% idle.
+
+    procs_running 1, procs_blocked 0. Scanning every /proc/<pid>/stat for
+    uninterruptible sleep finds exactly two entries, both kernel threads:
+
+        url_send        (Broadcom fastpath -> Linux stack hand-off)
+        sftp_polling    (Broadcom fastpath)
+
+    The load average is therefore an artefact of two permanently blocked Broadcom
+    kernel threads, not of queued work. It should not be read as CPU pressure, and
+    "kill a daemon to free CPU" is not a valid optimisation on this platform.
+
+
+--- 2. Memory ------------------------------------------------------------------------
+
+    Mem: 1019380 KB total, 585548 KB used, 433832 KB free, 0 swap
+
+    Userspace RSS is small: hostapd 4.1 MB, tdpServer 4.0 MB, cloud-brd 3.7 MB,
+    uhttpd 3.4 MB. The bulk of the used memory is kernel-side (fastpath flow cache,
+    driver buffers). Disabling vendor daemons would not give back meaningful RAM.
+
+
+--- 3. Throughput and latency --------------------------------------------------------
+
+    WAN link (eth5)            10000 Mb/s full duplex, link detected: yes
+    WAN port speed profile     auto, supports 10000F/5000F/2500F/1000F/100F
+
+    Transfer through the router (3 runs, 50 MB each):
+        759.7 Mbps   (cold)
+        1003.1 Mbps
+        997.3 Mbps
+
+    Latency to a public resolver (20 samples, 0.2 s interval):
+        idle          min 9.626  avg 12.881  max 14.916 ms
+        under load    min 11.621 avg 12.996  max 14.934 ms
+
+    The loaded figure is within 0.12 ms of the idle figure. There is no measurable
+    bufferbloat on this box, because the egress queues are htb + sfq (fair queuing)
+    rather than a single deep fifo. Per-device QoS and bandwidth limiting are
+    configured and their mangle chains do carry traffic (zone_wan_MSSFIX 3.0M
+    packets, zone_lan_qos 1.7M, zone_wan_qos 1.2M, plus one lan_limit_<mac> chain
+    per known client), but with the CPU at 2.3% busy they cost nothing measurable.
+    They were therefore left enabled.
+
+
+--- 4. DNS: caching is switched off in the shipped configuration ----------------------
+
+    /etc/dnsmasq.conf         cache-size=0
+    /etc/dnsmasq.conf         cname=tplinkwifi.net,tplinkwifi.net
+    /var/etc/dnsmasq.conf     (generated) contains: conf-file=/etc/dnsmasq.conf
+    dnsmasq 2.83, running as: /usr/sbin/dnsmasq -C /var/etc/dnsmasq.conf
+
+    dnsmasq's own default cache size is 150 entries; cache-size=0 disables the
+    cache entirely. With it disabled, every lookup from every LAN client is
+    forwarded to the ISP resolvers named in /tmp/resolv.conf.auto.
+
+    Measured from the LAN client, repeated identical queries against the router:
+        12 10 10 9 10 10 11 10 11 10   ms   (average 10.3 ms)
+    A cache hit would be a LAN round trip, i.e. single-digit milliseconds at most.
+
+    UNRESOLVED: setting cache-size=1500 in /etc/dnsmasq.conf and restarting
+    dnsmasq did NOT change that behaviour. The dnsmasq process was confirmed to
+    have restarted after the edit (process start time later than the file mtime),
+    the generated config does include the edited file, and dnsmasq 2.83 accepts
+    cache-size in an included configuration file. The queries still took ~10 ms.
+    Suspects that were checked and ruled out: a second resolver owning port 53
+    (dnsmasq owns it), an iptables/nat redirect of port 53 (none), a zero TTL in
+    the upstream answers (upstream TTLs are in the 200s), and the TP-Link parental
+    control DNS chain (it is a no-op, blocked=0).
+    The likely remaining explanation is the TP-Link dnsproxy daemon
+    (/usr/lib/dnsproxy/dnsproxy_deamon.sh, enabled with query_timeout 5 and
+    check_interval 30) sitting in front of the resolution path and re-answering
+    every query. That was not confirmed before this file was written.
+
+    Note also that /etc is a ramfs: this change does not survive a reboot.
+
+
+--- 5. Tunables that were changed ---------------------------------------------------
+
+Applied live and appended to /etc/sysctl.conf (applied at boot via S99sysctl):
+
+    net.ipv4.tcp_mtu_probing        0    -> 1
+    net.core.netdev_max_backlog  1000    -> 16384
+    net.core.somaxconn            128    -> 1024
+
+Rationale: PMTU probing recovers throughput lost to path-MTU black holes (the
+classic "fast on the speed test, slow in real use" symptom); a larger netdev
+backlog absorbs bursts on a 10 Gb/s WAN; a deeper accept queue suits bursty
+TLS-heavy clients.
+
+Already adequate, left alone:
+
+    net.core.rmem_max              2097152
+    net.core.wmem_max              2097152
+    net.ipv4.tcp_rmem   40960 655360 20971520
+    net.ipv4.tcp_wmem   40960 655360 20971520
+    net.ipv4.tcp_fastopen         1
+    net.netfilter.nf_conntrack_max 40960
+
+Original files were backed up on the device as /tmp/dnsmasq.conf.orig and
+/tmp/sysctl.conf.orig before any edit.
+
+
+--- 6. Things that cannot be done from userspace on this build -----------------------
+
+    BBR            tcp_available_congestion_control = reno cubic, and the module
+                   directory holds only iplatform and tuxera-fs. No tcp_bbr.
+    fq_codel/cake  same reason; default_qdisc stays pfifo_fast.
+    Module loading no modprobe or insmod in PATH.
+    cpufreq        no /sys/devices/system/cpu/cpu0/cpufreq at all - fixed clock.
+    cpuidle        state0 "nop" and state1 "wfi" can be disabled at runtime with
+                   echo 1 > /sys/devices/system/cpu/cpu0/cpuidle/state1/disable
+                   (reversible), but the fastpath rarely idles the CPU, so the
+                   expected effect on forwarding latency is small.
+
+
+--- 7. Vendor services running (146 processes) ----------------------------------------
+
+    cloud-brd, cloud-https, cloud-report     TP-Link cloud telemetry
+    tdpServer x3, pfclient, tmpServer        device management / parental controls
+    client_mgmt (32 MB VSZ), sync-server, conn-indicator
+    acsd2 (auto channel selection), powermanager, factory_reset, garp
+    uhttpd, dropbear (port 20001), netifd, ntpd, dnsmasq, 3 x hostapd
+    The installed Avira suite is NOT running.
+
+With the CPU idle, stopping these buys no throughput. It does reduce background
+traffic, flash writes and RAM, and the TP-Link cloud components can be disabled
+outright.

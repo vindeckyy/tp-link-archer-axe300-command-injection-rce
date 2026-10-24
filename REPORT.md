@@ -19,12 +19,34 @@
 
 | # | Finding | Severity | Access required |
 |---|---|---|---|
-| 1 | **Command injection in ISP Speed Test (`spdt_server`)** → arbitrary root shell | **Critical** | Admin session (stok token) |
-| 2 | Root shell escalation from the SSH `admin` account (supplementary group 0) | High | SSH as `admin` |
+| 1 | **Command injection in ISP Speed Test (`spdt_server`)** → arbitrary root shell | **High** (CVSS 3.1 **7.2**), Critical in practice for a network-edge device | Admin web session (token **and** `sysauth` cookie) |
+| 2 | Web UI credential also accepted by SSH; `admin` in group 0 with a group-writable root cron script → root escalation | High (impact amplification; reachable only after Finding 1) | SSH as `admin` |
 | 3 | Secondary injection surface: NTP server fields | Low (sanitized) | Admin session |
 | 4 | `tmp_avira` / CVE-2024-53375 present but gated by owner-ID validation | Informational | Admin session |
 
 The headline finding is **Finding 1**: a single authenticated request to the router's own web API executes attacker-chosen shell commands as **root**.
+
+### 1.1 Scoring
+
+**CVSS 3.1 base score: 7.2 (High)**
+
+```
+CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H
+```
+
+| Metric | Value | Why |
+|---|---|---|
+| AV | Network | The endpoint is the device's own HTTP API on port 80/443 |
+| AC | Low | One request; no race, no special conditions |
+| PR | High | Requires an admin web UI session |
+| UI | None | No user action beyond the attacker authenticating |
+| S/U | Unchanged | The device is a single security authority |
+| C/I/A | High | Root shell: read and write every setting, alter the datapath, deny service |
+
+The base score reflects the credential requirement. The practical severity is higher, because
+the affected device is the gateway for every host on the network, so the compromise is not
+bounded by the router itself. Any environment that scores "the edge device is critical"
+(most consumer and enterprise networks) should treat this as Critical despite the 7.2.
 
 ---
 
@@ -357,5 +379,83 @@ output proof the value piped command output to a listener on the LAN.
 
 Note on rate limiting: the router counts failed logins and locks the account
 (`failureCount` / `attemptsAllowed` appear in the login response). Run the PoC against a device
-you own or are authorised to test, and do not loop it against a router you depend on.
+you own or are authorised to test, and do not loop the PoC against a router you depend on.
+
+---
+
+## 8. Detection and incident response
+
+**On the device**
+
+| Indicator | Where to look |
+|---|---|
+| Commands executed via the speed test | syslog entries around `spdt` / `speedtest` activity |
+| Unexpected processes | `ps` — anything outside the vendor's expected list |
+| Modified web UI files | `/usr/lib/lua/luci/model/`, `/www/` (ramfs: compare before and after reboot) |
+| Changed account files | `/etc/passwd`, `/etc/shadow` — `admin`'s shell and home directory |
+| Added keys or a second dropbear | `/etc/dropbear/`, `/root/.ssh/` |
+| Extra listeners | `netstat -ltnp` — especially port 22 or an additional dropbear instance |
+| Shell metacharacters in the speed-test log | `/tmp/log/spdt_url` |
+| Non-default environment variables | `nvrammanager -s`, and the boot environment in `/data` |
+
+**Network side**
+
+- DNS answers that do not come from the configured resolvers.
+- Management UI sessions that are not yours.
+- Unexpected outbound SSH to TCP/20001 from the router.
+
+**Recovery**
+
+Revert the configuration files, remove added keys and processes, and flash a known-good image.
+Because `/etc` is a ramfs on this platform a reboot clears most filesystem-level changes —
+but not anything written to `/data`, `/tp_data`, `/user_data1`, `/user_data2`, or to flash.
+
+---
+
+## 9. Platform notes
+
+The platform is unusually open for a consumer router, which is worth recording for anyone
+continuing the research. Full detail, including the flash layout and the bootloader strings,
+is in `evidence/device-internals.txt`.
+
+- **Broadcom BCM4908 with an OpenWrt-derived userspace** (`model_brcm_bcm490x/generic`,
+  `opkg` present), booted by U-Boot 5.04L.02p1 with ARM Trusted Firmware and OP-TEE.
+- **A/B flash slots with rollback metadata**: `metadata1`/`metadata2` hold
+  `COMMITTED=1 / VALID=1,2 / SEQ=3,2`, so slot 1 is committed and slot 2 remains a valid
+  fallback.
+- **A flash programmer in userspace**: `/usr/bin/nvrammanager` exposes
+  `-r/-w/-e -p <partition>`, `-u`, `-c`, `-d` and `-s`, and can write the bootloader
+  environment (`nvram set …; nvram commit`).
+- **The vendor's upgrade path skips its own check**: `fmup.lua` runs `nvrammanager -c` before
+  `/sbin/sysupgrade`, but `/lib/upgrade/platform.sh`'s `platform_check_image()` is a no-op, so
+  invoking `sysupgrade` directly bypasses the supported-model list and the anti-downgrade check.
+- **A bypass lever in the bootloader**: the loader contains `signature`, `verify`,
+  `decryption`, and both `test_mode=enable` and `test_mode=disable`, while the kernel command
+  line carries `test_mode=disable`.
+- **`/etc` is a ramfs**: edits to `/etc`, `/usr/lib/lua` and `/www` do not survive a reboot.
+  Durable state lives in `/data`, `/tp_data`, `/user_data1`, `/user_data2`.
+- **A serial console** on `ttyAMA0` at 115200 reaches the bootloader prompt.
+
+A measured performance profile of the same unit — CPU headroom, the DNS cache being disabled
+in the shipped configuration, bufferbloat measurements, and the tunables that were changed —
+is in `evidence/performance-profile.txt`. That file is not part of this disclosure.
+
+---
+
+## 10. Evidence index
+
+| File | Contents |
+|---|---|
+| `evidence/vulnerable-spdt.lua.txt` | The extracted vulnerable Lua source and the client-side code that reaches it |
+| `evidence/session-auth-requirement.txt` | The API handshake the PoC depends on, live values redacted |
+| `evidence/device-internals.txt` | Flash layout, A/B metadata, `nvrammanager` interface, upgrade path, bootloader strings |
+| `evidence/performance-profile.txt` | Measured performance profile and the tunables that were changed |
+| `evidence/device-state-after.txt` | Post-cleanup device state with notes |
+
+All values that identify the tested unit or authenticate to it were removed from this
+repository and from its history: the admin password, the `md5("admin" + password)` session
+hash, the session secret, AES key and IV, session token, session id, client MAC and the test
+host's address. Where the shape of a value matters to the explanation, a placeholder with the
+format is shown instead.
+
 

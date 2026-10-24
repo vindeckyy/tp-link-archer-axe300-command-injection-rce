@@ -6,6 +6,10 @@ Subject: how a client authenticates to the web API (needed by the proof of conce
 This file records the API handshake the PoC implements. It is the reason a naive
 client gets empty responses back.
 
+NOTE ON REDACTION: every live value below was replaced with a placeholder before
+publication. The session secret, AES key/IV, session token and the md5 password
+hash are credentials for the tested device and are deliberately not included.
+
 
 --- 1. Session cookie, not just the stok -------------------------------------------
 
@@ -77,8 +81,10 @@ The hash is md5(username .. password):
             local shadow = nixio.crypt(pwd_str, password)
             if shadow == password then ...
 
-On this device the web account is "admin" and the session hash observed was
-<md5 of "admin" + password> = md5("admin" .. <admin password>).
+On this device the web account is "admin" and the session hash is
+md5("admin" .. <admin password>) -- redacted here. Anyone holding that hash can
+authenticate in place of the password, so it is treated as a credential and is not
+published.
 
 
 --- 3. Sequence number -------------------------------------------------------------
@@ -97,17 +103,17 @@ is used unchanged for every request in the session. The router keeps it in
 /tmp/luci-seqnum.
 
 
---- 4. Session contents (read from the device) --------------------------------------
+--- 4. Session contents (shape only, values redacted) ------------------------------
 
-    ["hash"]   = "<md5 of "admin" + password>"
+    ["hash"]   = <md5 of "admin" + password>      REDACTED
     ["user"]   = "admin"
-    ["aesiv"]  = "<aes iv>"
-    ["secret"] = "<32-hex session secret>"
-    ["addr"]   = "<client MAC>"     (client MAC)
-    ["token"]  = "<32-hex stok>"   (the stok)
-    ["atime"]  = 316710
-    ["seqnum"] = <session seqnum>
-    ["aeskey"] = "<aes key>"
+    ["aesiv"]  = <16-digit AES IV>                REDACTED
+    ["secret"] = <32-hex session secret>          REDACTED
+    ["addr"]   = <client MAC>                     REDACTED
+    ["token"]  = <32-hex stok>                    REDACTED
+    ["atime"]  = <uptime seconds of last use>
+    ["seqnum"] = <session sequence number>        REDACTED
+    ["aeskey"] = <16-digit AES key>               REDACTED
 
 The session file name is a separate 32-hex id; the stok is carried inside as "token".
 Note that the session stores the client address, so a session is bound to one client.

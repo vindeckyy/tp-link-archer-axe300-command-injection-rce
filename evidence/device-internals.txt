@@ -1,0 +1,220 @@
+=== Device internals, extracted from the unit under test ===
+Device : TP-Link Archer AXE300 (AXE16000 Quad-Band Wi-Fi 6E) v1.0
+Firmware: 1.0.11 Build 20241115 rel.76431(5553)
+Date   : 2026-10-24
+
+Collected read-only through the injection channel described in this repository.
+Everything here is vendor firmware behaviour, reproduced so that other researchers
+can reason about the platform without repeating the work. All identifiers that
+belong to the tested unit (MACs, device id, product id, session material) are
+redacted.
+
+
+--- 1. Platform ---------------------------------------------------------------------
+
+    /proc/device-tree/model        Broadcom-v8A
+    /proc/device-tree/compatible   brcm,brcm-v8A
+    /etc/openwrt_release           DISTRIB_ID="OpenWrt"
+                                   DISTRIB_RELEASE="Attitude Adjustment"
+                                   DISTRIB_TARGET="model_brcm_bcm490x/generic"
+
+    CPU     : 2 x ARMv8-A Cortex-A53
+    Kernel  : 4.19.183 (vendor), SMP, aarch64
+    Boot    : U-Boot 5.04L.02p1 + ARM Trusted Firmware + OP-TEE
+              (the bootfs volume contains "Simple image with ATF and optional
+              OP-TEE support" and "Jarm-trusted-firmware")
+    Console : ttyAMA0 at 115200 (kernel console; the bootloader is on the same port)
+    Userspace: OpenWrt 12.09-rc1 derivative, /usr/bin/opkg present,
+              147 binaries in /usr/bin, 142 in /usr/sbin
+
+The "bcm490x" name and the fdt string "fdt_94912" identify the BCM4908 class SoC.
+
+
+--- 2. Flash layout (256 MB SPI NOR) -----------------------------------------------
+
+    /proc/mtd
+        mtd0  10000000  "spi1.0"        (256 MB, the whole chip)
+        mtd1  00200000  "loader"        2 MB   bootloader + U-Boot + ATF
+        mtd2  0e100000  "image"         225 MB UBI image (slots, metadata, data)
+        mtd3  00700000  "tpconfig"      7 MB
+        mtd4  01600000  "userconfig"    22 MB
+        mtd5  00000500  "metadata1"     1.25 KB A/B slot metadata
+        mtd6  00000500  "metadata2"     1.25 KB A/B slot metadata
+        mtd7  009c4338  "bootfs1"       kernel + bootloader payload, slot A
+        mtd8  023f7000  "rootfs1"       slot A root
+        mtd9  009c5b30  "bootfs2"       kernel + bootloader payload, slot B
+        mtd10 023f7000  "rootfs2"       slot B root
+        mtd11 0041e000  "data"          persistent config
+        mtd12 005d0000  "tp_data"       persistent vendor config
+        mtd13 00bde000  "user_data1"    persistent user settings
+        mtd14 0087a000  "user_data2"    persistent user settings
+
+    Kernel command line
+        coherent_pool=4M cpuidle_sysstate_switch pci=pcie_bus_safe
+        console=ttyAMA0,115200 init=/etc/preinit earlycon rootwait
+        mtdparts=spi1.0:2097152(loader),235929600@2097152(image),
+                 7340032@238026752(tpconfig),23068672@245366784(userconfig)
+        root=/dev/ubiblock0_4 ubi.mtd=image ubi.block=0,4 rootfstype=squashfs
+        cma=0M test_mode=disable
+
+
+--- 3. A/B slots and rollback metadata ----------------------------------------------
+
+Inside the "image" UBI, volumes 1..6 are the slots:
+
+    ubi0_1  metadata1   static    ubi0_2  metadata2   static
+    ubi0_3  bootfs1     static    ubi0_4  rootfs1     dynamic
+    ubi0_5  bootfs2     static    ubi0_6  rootfs2     dynamic
+    ubi0_10 data        dynamic
+
+Both metadata volumes hold the standard A/B selection record:
+
+    COMMITTED=1
+    VALID=1,2
+    SEQ=3,2
+
+i.e. slot 1 is the committed boot slot, slot 2 is still valid and carries the older
+sequence number. That is the rollback target: a slot that fails to boot leaves a
+valid, older image to fall back to.
+
+
+--- 4. Mount points and volatility --------------------------------------------------
+
+    /dev/ubiblock0_4  /        squashfs  (ro)     slot 1 root, read-only
+    ramfs             /etc                (rw)     VOLATILE
+    ramfs             /usr/lib/lua        (rw)     VOLATILE
+    ramfs             /www/tmp            (rw)     VOLATILE
+    ramfs             /overlay            (rw)     VOLATILE (overlayfs is NOT used)
+    tmpfs             /tmp                (rw)     VOLATILE
+    ubi:data          /data               (rw)     persistent
+    ubi1:tp_data      /tp_data            (rw)     persistent
+    ubi2:user_data1   /user_data1         (rw)     persistent
+    ubi2:user_data2   /user_data2         (rw)     persistent
+
+This is the single most important operational fact for anyone modifying this
+firmware: /etc is a ramfs, so edits to it, to /usr/lib/lua and to /www are lost on
+reboot. Durable state goes in /data, /tp_data or /user_data1-2.
+
+/data also holds the boot environment copies:
+
+    /data/.kernel_nvram.setting    40 KB
+    /data/.user_nvram.setting       32 KB
+    /data/boot_state_0              18 bytes
+
+
+--- 5. Flash programmer in userspace ------------------------------------------------
+
+    /usr/bin/nvrammanager
+
+    Usage: nvrammanager [OPTIONS1] [OPTIONS2]
+
+    [OPTIONS1]
+      -r, --read=FILE                  Read partition to FILE
+      -w, --write=FILE                 Write FILE to partition
+      -e, --erase                      Erase partition
+      -s, --show                       Show partition table
+      -u, --upgrade=FILE               Upgrade firmware from FILE
+      -c, --check=FILE                 Check upgrade FILE
+      -f, --factory                    Force reset to factory config after upgrade
+      -b, --backup                     Check if need backup the rootfs
+      -d, --derive=FILE                derive partitions from firmware
+    [OPTIONS2]
+      -p, --partition=PTN_NAME         Partition name, required with -r/-w/-e
+
+    The binary also contains "nvram set %s=%s" and "nvram commit", i.e. it can write
+    the bootloader environment, and DES_set_key_unchecked / AES_set_encrypt_key,
+    i.e. the firmware payload is encrypted.
+
+The vendor's partition table as reported by "nvrammanager -s" (offsets in bytes):
+
+    01 factory-boot     0x00000000  0x00028000
+    02 fs-uboot         0x00028000  0x00018000
+    03 os-image         0x00040000  0x00ec0000
+    04 file-system      0x00280000  0x00c00000
+    05 portal-back      0x00e80000  0x00070000
+    06 portal-logo      0x00ee0000  0x00010000
+    07 default-mac      0x00f00000  0x00000200
+    08 pin              0x00f00200  0x00000100
+    09 device-id        0x00f00300  0x00000200
+    10 product-info     0x00f00500  0x0000fb00
+    11 soft-version     0x00f10000  0x00001000
+    12 extra-para       0x00f11000  0x00001000
+    13 support-list     0x00f12000  0x00004000
+    14 profile          0x00f16000  0x0000a000
+    15 partition-table  0x00f20000  0x00010000
+    16 default-config   0x00f30000  0x00010000
+    17 ap-def-config    0x00f40000  0x00010000
+    18 user-config      0x00f50000  0x00020000
+    19 ap-config        0x00f70000  0x00020000
+    20 router-config    0x00f90000  0x00020000
+    21 certificate      0x00fb0000  0x00010000
+    22 radio_bk         0x00fc0000  0x00010000
+
+
+--- 6. The vendor's own firmware-upgrade path ---------------------------------------
+
+Web UI -> /usr/lib/lua/luci/controller/admin/firmware.lua -> model/fmup.lua:
+
+    local ret = sys.fork_call("nvrammanager -c \"%s\" > /dev/console" % (firmware_file))
+    if ret == 0 then
+        debug.printf("firmware check OK")
+        ...
+        sys.fork_exec("/sbin/sysupgrade \"%s\"" % (firmware_file))
+
+/sbin/sysupgrade is the stock OpenWrt upgrade script. Its platform hook is:
+
+    /lib/upgrade/platform.sh
+        platform_check_image() { echo "Platform image check OK ..."; return 0; }
+        platform_do_upgrade()  { ...; nvrammanager -u $@; }
+
+Note that platform_check_image() is a no-op: the model checks the image with
+"nvrammanager -c" before calling sysupgrade, but sysupgrade on its own does not.
+The nvrammanager check enforces a supported-model list ("nm_checkSupportList",
+"Firmwave supports / not supports") and rejects downgrades ("nm_checkSoftVer",
+"software version dismatched").
+
+
+--- 7. Bootloader verification and its bypass lever ---------------------------------
+
+The bootloader partition contains the strings:
+
+    signature   verify   decryption   test_mode   test_mode=enable   test_mode=disable
+
+and the kernel command line carries test_mode=disable, i.e. the shipped image is
+verified at boot. "test_mode=enable" is present in the same binary, and the
+environment it lives in is writable from userspace (see section 4). The practical
+consequence: replacing the root filesystem needs either a bootloader path that
+accepts an unsigned image, or the serial console.
+
+For reference, the stock OpenWrt tree does carry a target for this SoC family:
+
+    target/linux/bcm4908/Makefile
+        BOARDNAME:=Broadcom BCM4908 (ARMv8A CPUs Brahma-B53)
+        FEATURES:=squashfs nand usb gpio
+        CPU_TYPE:=cortex-a53
+        SUBTARGETS:=generic
+
+but no device port exists for the Archer AXE300, and the vendor's datapath
+(bcmenet, bcmtm, bluetopia, the WLAN driver) is closed, so a stock image would not
+bring working wireless or broadband.
+
+
+--- 8. Networking stack in practice -------------------------------------------------
+
+    qdisc htb 1: root ...          on eth5 and br-lan   (vendor QoS shaping)
+    qdisc sfq ...                 per class
+    default_qdisc                 pfifo_fast
+    br-lan                        eth0..eth4, eth6, wl0, wl0.2, wl0.3
+    WAN                           eth5, DHCP
+
+    iptables rule counts          filter 146   mangle 303   nat 61
+    mangle chains in use         zone_wan_MSSFIX, zone_lan_qos, zone_wan_qos,
+                                  client_speed_limit_{lan,wan}_rule,
+                                  lan_limit_<mac> (one per known client),
+                                  parental_ctrl_dns_resp
+    conntrack                    394 entries used, max 40960
+    modules available             /lib/modules/4.19.183 -> iplatform, tuxera-fs
+                                  (no sch_fq_codel, no sch_cake, no tcp_bbr,
+                                   and no modprobe/insmod in PATH)
+    cpufreq                      absent - the SoC clock is fixed
+    cpuidle                      state0 "nop", state1 "wfi"
