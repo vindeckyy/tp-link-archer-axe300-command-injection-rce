@@ -1,11 +1,19 @@
-# TP-Link Archer AXE300 — authenticated command injection in the ISP Speed Test (root RCE)
+# TP-Link Archer AXE300 — authenticated command injection (root RCE) in the ISP Speed Test
 
-**`spdt_server` is concatenated into a shell command string and executed as root.**
+**`spdt_server` is concatenated into a shell command string and executed as `root` on the router.**
+
+A remote attacker holding the Archer AXE300's admin web UI credential can send a single HTTP
+request to the router's own JSON API and run arbitrary shell commands as root — full compromise
+of the device and, because the router is the network gateway, of everything behind it. The
+flaw is CWE-78 (OS command injection) in the vendor's LuCI model layer, present in the
+**latest shipping firmware, 1.0.11 Build 20241115**, on a model that is **not** covered by
+TP-Link's own command-injection advisory.
 
 > **Disclosure status.**
-> This finding has **not** been reported to TP-Link, **not** sent to any vendor, **not** shared
-> with any third party, and **not** published in an advisory, mailing list post, blog,
-> conference talk, preprint, issue tracker, or chat anywhere else. No prior disclosure exists.
+> Published publicly in this repository on **2026-10-24**. This finding has **not** been
+> reported to TP-Link, **not** sent to any vendor, and **not** shared with any third party
+> before that date. No prior disclosure, advisory or CVE exists for this model or this code
+> path.
 >
 > The test was performed on the owner's own hardware with the owner's explicit permission and
 > credentials. The device was returned to its original state afterwards — the verification is
@@ -17,22 +25,29 @@
 authorization to reach devices you do not own. Read the full
 [Legal Disclaimer and Terms of Use](DISCLAIMER.md) before use.
 
+**In one line:** one authenticated request → root shell on the gateway → every LAN host,
+every stored credential, every packet.
+
 ---
 
 ## Contents
 
 - [Summary](#summary)
-- [Affected device](#affected-device)
+- [Am I affected?](#am-i-affected)
 - [The vulnerability](#the-vulnerability)
 - [Full request path](#full-request-path)
 - [Reproduction](#reproduction)
 - [Impact and threat model](#impact-and-threat-model)
+- [Scoring](#scoring)
 - [Secondary findings](#secondary-findings)
 - [Surfaces tested and found clean](#surfaces-tested-and-found-clean)
+- [The same bug class across TP-Link's line](#the-same-bug-class-across-tp-links-line)
 - [Remediation](#remediation)
 - [Detection and incident response](#detection-and-incident-response)
+- [Frequently asked questions](#frequently-asked-questions)
 - [Platform notes](#platform-notes)
 - [Repository layout](#repository-layout)
+- [References](#references)
 
 ---
 
@@ -41,19 +56,21 @@ authorization to reach devices you do not own. Read the full
 | | |
 |---|---|
 | **Vulnerability** | OS command injection → arbitrary command execution as **root** |
+| **Product** | TP-Link Archer AXE300 (AXE16000 Quad-Band Wi-Fi 6E, two 10G ports) |
 | **Component** | ISP Speed Test, `spdt_server` request field |
 | **Endpoint** | `POST /cgi-bin/luci/;stok=<token>/admin/speedtest?form=speedtest`, `operation=start` |
 | **Vulnerable code** | `/usr/lib/lua/luci/model/spdt.lua` → `SPEED_TEST_INST:start_spt(form)` |
+| **Firmware tested** | 1.0.11 Build 20241115 rel.76431(5553) — the current US release |
 | **Privilege obtained** | `uid=0(root)` |
 | **Authentication** | An admin web UI session (session token **plus** the `sysauth` cookie) |
 | **User interaction** | None |
 | **CVSS 3.1** | `AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H` → **7.2 (High)** |
+| **CVSS 4.0** | `AV:N/AC:L/AT:N/PR:H/UI:N/VC:H/VI:H/VA:H/SC:L/SI:L/SA:L` → **8.5 (High)** |
 | **CWE** | CWE-78 (OS command injection) → CWE-88 (argument injection) → CWE-269 (improper privilege management) |
 
-The base score is 7.2 because the attacker needs an admin session. The *practical* severity is
-higher: the affected device is the network edge, so a single injection yields the gateway
-itself — every packet of every LAN client, every stored credential, and every IoT device
-behind it.
+The base score reflects the credential requirement. The *practical* severity is higher: the
+affected device is the network edge, so a single injection yields the gateway itself — every
+packet of every LAN client, every stored credential, and every IoT device behind it.
 
 **Proof in one command:**
 
@@ -84,23 +101,23 @@ sftpadmin:x:1001:0:sftpadmin:/var:/bin/false
 
 ---
 
-## Affected device
+## Am I affected?
 
 | | |
 |---|---|
-| Model | TP-Link Archer AXE300 (AXE16000 Quad-Band Wi-Fi 6E), hardware v1.0 |
-| Firmware | 1.0.11 Build 20241115 rel.76431(5553) |
-| SoC | Broadcom BCM4908 class (`Broadcom-v8A`), 2 × Cortex-A53 |
-| Kernel | Linux 4.19.183, aarch64, BusyBox v1.19.4 |
-| Bootloader | U-Boot 5.04L.02p1 + ARM Trusted Firmware + OP-TEE, console on `ttyAMA0` 115200 |
-| Web stack | uhttpd + LuCI (Lua), JSON API under `/cgi-bin/luci/;stok=<token>/…` |
-| Userspace | OpenWrt 12.09-rc1 derivative (`model_brcm_bcm490x/generic`), `opkg` present |
-| Storage | 256 MB SPI NOR, A/B firmware slots, UBI |
+| **Affected model** | Archer AXE300 / AXE16000, hardware **V1** (V1.6 and V1.8 ship the same firmware) |
+| **Affected firmware** | 1.0.11 Build 20241115 rel.76431(5553) — and, as far as verified, earlier builds on the same code path |
+| **Latest available firmware** | 1.0.11 Build 20241115, published 2024-12-05. **There is no fixed firmware for this model.** |
+| **Fixed by the vendor?** | **No.** The AXE300 does not appear in TP-Link's advisory [FAQ 4935](https://www.tp-link.com/us/support/faq/4935/), which lists the fixed builds for Archer BE230, BE3600, AXE75, AX73 and Deco BE25 |
+| **Who is exposed** | Anyone whose admin web UI credential is known, phished, reused, or brute-forced |
+| **Not exposed** | Anyone without the admin credential — the endpoint is behind a valid session, and the unauthenticated admin API returns empty bodies |
 
-The vulnerable code path is in the vendor's LuCI model layer and is reached through the
-admin page **Advanced → Network → Internet → Speed Test**. The same file, and the same
-`sys.fork_call` pattern, appears across `/usr/lib/lua/luci/model/` — see
-[Remediation](#remediation).
+The 1.0.11 release note says "Enhanced system security". The injection is still there.
+
+**Check yourself in ten seconds.** Log in to the router, open **Advanced → Network → Internet →
+Speed Test**, and watch what happens when a URL is submitted: the request field `spdt_server`
+is passed to `sys.fork_call()` unmodified, so any shell metacharacter in it is executed. Do
+not test this on a device you depend on unless you are authorised to.
 
 ---
 
@@ -226,10 +243,8 @@ $ cd tp-link-axe300-rce-findings
 $ python3 poc/axe300_spdt_poc.py --host 192.168.0.1 --password '<admin-password>' --sleep 5
 ```
 
-This repository is **private** while the disclosure decision rests with the author, so cloning
-it requires access (or a fork). The PoC itself is a single self-contained file with no
-dependencies beyond `cryptography`, so copying `poc/axe300_spdt_poc.py` out of the repository
-is enough to reproduce everything.
+The PoC is a single self-contained file with no dependencies beyond `cryptography`, so
+copying `poc/axe300_spdt_poc.py` out of this repository is enough to reproduce everything.
 
 ### PoC options
 
@@ -311,6 +326,40 @@ network rather than one host.
 
 ---
 
+## Scoring
+
+**CVSS 3.1 base score: 7.2 (High)**
+
+```
+CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H
+```
+
+| Metric | Value | Why |
+|---|---|---|
+| AV | Network | The endpoint is the device's own HTTP API on port 80/443 |
+| AC | Low | One request; no race, no special conditions |
+| PR | High | Requires an admin web UI session |
+| UI | None | No user action beyond the attacker authenticating |
+| S/U | Unchanged | The device is a single security authority |
+| C/I/A | High | Root shell: read and write every setting, alter the datapath, deny service |
+
+**CVSS 4.0 base score: 8.5 (High)**
+
+```
+CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:N/VC:H/VI:H/VA:H/SC:L/SI:L/SA:L
+```
+
+This is the same vector TP-Link itself publishes for the authenticated command-injection
+family in [FAQ 4935](https://www.tp-link.com/us/support/faq/4935/), including
+[CVE-2026-22226](https://nvd.nist.gov/vuln/detail/CVE-2026-22226), whose CVSS 3.1 vector and
+score (`AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H`, 7.2 High) are identical to the ones above.
+
+The base score reflects the credential requirement. The practical severity is higher, because
+the affected device is the gateway for every host on the network, so the compromise is not
+bounded by the router itself.
+
+---
+
 ## Secondary findings
 
 ### The web UI password is also the SSH password
@@ -379,6 +428,36 @@ Recorded so they are not re-tested.
 
 ---
 
+## The same bug class across TP-Link's line
+
+TP-Link publishes its own command-injection advisories as CNA. The pattern here — a LuCI
+model concatenating request data into a `sys.fork_call()` string — is the same class as the
+issues below, which are fixed in specific firmware builds. They are listed because they
+establish that this is a recurring class in this codebase, and because the AXE300's ISP Speed
+Test is not among the covered paths.
+
+| CVE | Component | Affected models | Fixed in |
+|---|---|---|---|
+| [CVE-2026-0630](https://nvd.nist.gov/vuln/detail/CVE-2026-0630) | Web Modules | Archer BE230 v1.2, Archer AXE75 v1.0 | BE230 < 1.2.4 Build 20251218; AXE75 < 1.5.6 Build 20260623 |
+| [CVE-2026-0631](https://nvd.nist.gov/vuln/detail/CVE-2026-0631) | VPN Modules | Archer BE230 v1.2, BE3600 v1 | see FAQ 4935 |
+| [CVE-2026-22221](https://nvd.nist.gov/vuln/detail/CVE-2026-22221), [-22223](https://nvd.nist.gov/vuln/detail/CVE-2026-22223) | VPN Modules / VPN connection | BE230, BE3600 | see FAQ 4935 |
+| [CVE-2026-22224](https://nvd.nist.gov/vuln/detail/CVE-2026-22224) | Cloud Communication | BE230 | see FAQ 4935 |
+| [CVE-2026-22225](https://nvd.nist.gov/vuln/detail/CVE-2026-22225) | VPN Connection Service | BE230, AXE75 | see FAQ 4935 |
+| [CVE-2026-22226](https://nvd.nist.gov/vuln/detail/CVE-2026-22226) | VPN Server Configuration | BE230 v1.2, AX73 v2 | BE230 < 1.2.4; AX73 < 1.3.1 Build 20260430 |
+| [CVE-2026-22227](https://nvd.nist.gov/vuln/detail/CVE-2026-22227) | Configuration Backup Restoration | BE230 | see FAQ 4935 |
+| [CVE-2026-22229](https://nvd.nist.gov/vuln/detail/CVE-2026-22229) | Import of Crafted Configuration File | BE230, Deco BE25 | BE230 < 1.2.4; BE25 <= 1.1.1 Build 20250822 |
+| [CVE-2024-21833](https://nvd.nist.gov/vuln/detail/CVE-2024-21833) | Unauthenticated command execution | Archer AX3000, AX5400, AXE75, Deco X50, XE200 | firmware prior to Build 20231115 |
+| [CVE-2023-1389](https://nvd.nist.gov/vuln/detail/CVE-2023-1389) | Command injection (via a web endpoint) | Archer AX21 | see advisory |
+
+TP-Link's consolidated advisory for the 2026 family is
+**[Security Advisory on Authenticated Command Injection Vulnerabilities — FAQ 4935](https://www.tp-link.com/us/support/faq/4935/)**
+(last updated 2026-09-18). It states: *"Each CVE represents a distinct OS command injection
+issue in a separate code path, and is therefore tracked under an individual CVE ID."*
+
+**The Archer AXE300 is not listed there, and no fixed firmware for it exists.**
+
+---
+
 ## Remediation
 
 **For the vendor**
@@ -402,6 +481,7 @@ Recorded so they are not re-tested.
 - Restrict admin access to the LAN, and never expose the management interface to the
   internet.
 - Use a long, unique admin password, and change it if it has ever been reused elsewhere.
+- Leave the ISP Speed Test disabled if you do not need it.
 - Watch for the indicators below.
 
 ---
@@ -410,28 +490,80 @@ Recorded so they are not re-tested.
 
 **On the device**
 
-| Indicator | Where |
+| Indicator | Where to look |
 |---|---|
-| Commands executed from the speed test | `syslog` entries around `spdt`/`speedtest` activity |
-| Unexpected processes | `ps` — anything not in the vendor's expected list |
-| Modified web UI files | `/usr/lib/lua/luci/model/`, `/www/` (both are ramfs; compare after reboot) |
-| Changed account files | `/etc/passwd`, `/etc/shadow` (`admin` shell, home directory) |
-| Authorised keys or a new dropbear | `/etc/dropbear/`, `/root/.ssh/` |
-| Extra listeners | `netstat -ltnp` — especially port 22 or a second dropbear |
-| Non-empty `/tmp/log/spdt_url` containing shell metacharacters | speed test log file |
+| Commands executed via the speed test | syslog entries around `spdt` / `speedtest` activity |
+| Unexpected processes | `ps` — anything outside the vendor's expected list |
+| Modified web UI files | `/usr/lib/lua/luci/model/`, `/www/` (ramfs: compare before and after reboot) |
+| Changed account files | `/etc/passwd`, `/etc/shadow` — `admin`'s shell and home directory |
+| Added keys or a second dropbear | `/etc/dropbear/`, `/root/.ssh/` |
+| Extra listeners | `netstat -ltnp` — especially port 22 or an additional dropbear instance |
+| Shell metacharacters in the speed-test log | `/tmp/log/spdt_url` |
+| Non-default environment variables | `nvrammanager -s`, and the boot environment in `/data` |
 
 **Network side**
 
-- DNS answers that do not match the configured resolvers.
-- A management UI session that is not yours.
-- Unexpected outbound SSH (TCP/20001) from the router.
+- DNS answers that do not come from the configured resolvers.
+- Management UI sessions that are not yours.
+- Unexpected outbound SSH to TCP/20001 from the router.
 
 **Recovery**
 
 Revert the configuration files, remove added keys and processes, and flash a known-good
-firmware image. Because `/etc` is a ramfs on this platform, a reboot clears most
-filesystem-level changes — but not anything written to `/data`, `/tp_data`,
-`/user_data1`, `/user_data2`, or to flash.
+firmware image. Because `/etc` is a ramfs on this platform a reboot clears most
+filesystem-level changes — but not anything written to `/data`, `/tp_data`, `/user_data1`,
+`/user_data2`, or to flash.
+
+---
+
+## Frequently asked questions
+
+**Is the TP-Link Archer AXE300 vulnerable to remote code execution?**
+Yes. Firmware 1.0.11 Build 20241115 — the current release — contains an OS command injection
+in the ISP Speed Test module that yields a root shell from a single authenticated HTTP
+request.
+
+**Do I need the admin password?**
+Yes. The vulnerable endpoint requires a valid admin web session: the session token in the URL
+*and* the `sysauth` cookie. Without them the router answers HTTP 200 with an empty body and
+nothing happens.
+
+**Is it pre-authentication?**
+No. It is an authenticated vulnerability. That is why the severity discussion focuses on what
+the admin credential is worth: it is the same credential the owner types into the same page,
+and on this device it is also the SSH password.
+
+**What is the impact of the injection?**
+Arbitrary commands as `uid=0(root)`: read and modify all configuration including stored
+credentials, intercept and alter all LAN traffic, install persistence, or brick the device.
+
+**Which firmware versions are affected?**
+At least 1.0.11 Build 20241115, which is the latest published US firmware for Archer AXE300
+V1. The vulnerable code path is the same `sys.fork_call` pattern found across the vendor's LuCI
+model layer. No fixed firmware exists for this model.
+
+**Has TP-Link been notified?**
+Not as of publication. No advisory, CVE or third-party report exists for this model or code
+path. TP-Link's own advisory for the equivalent class on other models is FAQ 4935.
+
+**Is there a CVE for this?**
+Not yet. This issue is not in the NVD, and the AXE300 is absent from TP-Link's advisory list.
+If you work at TP-Link and want a CVE assigned, the reproduction in [`REPORT.md`](REPORT.md)
+is complete.
+
+**How do I check whether my device is vulnerable without exploiting it?**
+Open **Advanced → Network → Internet → Speed Test** and read the request in your browser's
+developer tools: the `spdt_server` field is sent unvalidated to a shell. Do not inject
+anything on a device you depend on unless you are authorised to.
+
+**Can I fix it without a firmware update?**
+Not the injection itself. You can reduce exposure: keep admin access on the LAN only, use a
+long unique password, disable remote management, and avoid the Speed Test feature.
+
+**Does the proof of concept need the router's browser session?**
+No. `poc/axe300_spdt_poc.py` implements the whole handshake from scratch — RSA-encrypted
+password, AES-CBC request body, RSA signature, session cookie — and needs only the admin
+credential.
 
 ---
 
@@ -459,6 +591,9 @@ anyone continuing the research. Full detail in
 - **`/etc` is a ramfs.** Every edit to `/etc`, `/usr/lib/lua` and `/www` is lost on reboot;
   durable state lives in `/data`, `/tp_data`, `/user_data1`, `/user_data2`.
 - **A serial console** on `ttyAMA0` at 115200 reaches the bootloader prompt.
+- **Third-party firmware is officially contemplated.** TP-Link's download pages state that
+  "some official firmware of TP-Link products can be replaced by the third party firmware such
+  as DD-WRT", with the warranty voided.
 
 For completeness, a measured performance profile of the unit — CPU headroom, the DNS cache
 being disabled in the shipped configuration, bufferbloat measurements and the tunables that
@@ -494,12 +629,39 @@ with the format is shown instead.
 
 ---
 
+## References
+
+**Vendor**
+
+- [Archer AXE300 firmware downloads](https://www.tp-link.com/us/support/download/archer-axe300/v1/#Firmware) — 1.0.11 Build 20241115 is the latest US release
+- [TP-Link Security Advisory on Authenticated Command Injection Vulnerabilities (FAQ 4935)](https://www.tp-link.com/us/support/faq/4935/) — the equivalent class on other models, with fixed builds
+- [Archer AXE300 GPL source code](https://www.tp-link.com/resources/gpl/AXE300v1_GPL.tar.gz)
+- [How to find your hardware version](https://www.tp-link.com/us/support/faq/46/)
+
+**CVE records**
+
+- [CVE-2026-0630](https://nvd.nist.gov/vuln/detail/CVE-2026-0630) · [CVE-2026-0631](https://nvd.nist.gov/vuln/detail/CVE-2026-0631) · [CVE-2026-22221](https://nvd.nist.gov/vuln/detail/CVE-2026-22221) · [CVE-2026-22223](https://nvd.nist.gov/vuln/detail/CVE-2026-22223) · [CVE-2026-22224](https://nvd.nist.gov/vuln/detail/CVE-2026-22224) · [CVE-2026-22225](https://nvd.nist.gov/vuln/detail/CVE-2026-22225) · [CVE-2026-22226](https://nvd.nist.gov/vuln/detail/CVE-2026-22226) · [CVE-2026-22227](https://nvd.nist.gov/vuln/detail/CVE-2026-22227) · [CVE-2026-22229](https://nvd.nist.gov/vuln/detail/CVE-2026-22229)
+- [CVE-2024-21833](https://nvd.nist.gov/vuln/detail/CVE-2024-21833) — unauthenticated command execution in TP-Link Archer/Deco products
+- [CVE-2023-1389](https://nvd.nist.gov/vuln/detail/CVE-2023-1389) — Archer AX21 command injection
+
+**Weaknesses and background**
+
+- [CWE-78: Improper Neutralization of Special Elements used in an OS Command](https://cwe.mitre.org/data/definitions/78.html)
+- [CWE-88: Improper Neutralization of Argument Delimiters in a Command](https://cwe.mitre.org/data/definitions/88.html)
+- [CWE-269: Improper Privilege Management](https://cwe.mitre.org/data/definitions/269.html)
+- [CVSS v3.1 specification](https://www.first.org/cvss/v3.1/specification-document) · [CVSS v4.0 specification](https://www.first.org/cvss/v4.0/specification-document)
+- [OpenWrt LuCI dispatcher](https://github.com/openwrt/luci) — the `luci/sauth.lua` and `luci/dispatcher.lua` files referenced in this report
+- [OpenWrt `bcm4908` target](https://github.com/openwrt/openwrt/tree/main/target/linux/bcm4908)
+
+---
+
 ## Acknowledgements
 
 Thanks to the owner of the hardware, who authorised the test and supplied the credential.
 The device was returned to its original state; the verification is in
 [`evidence/device-state-after.txt`](evidence/device-state-after.txt).
 
-If you are a vendor reading this and want to do the right thing: the disclosure status
-above says this has not been reported yet. If it turns out that it has been, the report in
-[`REPORT.md`](REPORT.md) is complete enough to reproduce and to fix.
+If you are a vendor reading this and want to do the right thing: the report in
+[`REPORT.md`](REPORT.md) is complete enough to reproduce and to fix, and
+[`evidence/device-internals.txt`](evidence/device-internals.txt) documents the platform in
+enough detail to audit the rest of `/usr/lib/lua/luci/model/` for the same pattern.

@@ -2,12 +2,14 @@
 
 ## Status of this finding
 
-The vulnerability documented here has **not** been reported to TP-Link, **not** sent to any
-vendor, **not** shared with any third party, and **not** published in an advisory, mailing
-list post, blog, conference talk, preprint, issue tracker, or chat anywhere else. No prior
-disclosure exists.
+Published publicly in this repository on **2026-10-24**. Before that date the finding had
+**not** been reported to TP-Link, **not** sent to any vendor, and **not** shared with any
+third party. No advisory, mailing list post, blog, conference talk, preprint or issue existed
+for it, and no prior disclosure is known.
 
-This repository is private while the disclosure decision rests with the author.
+The Archer AXE300 does not appear in TP-Link's own command-injection advisory
+([FAQ 4935](https://www.tp-link.com/us/support/faq/4935/)), and no CVE covers this model or
+this code path.
 
 ## If you run the affected firmware
 
@@ -31,16 +33,17 @@ Until a firmware update is available:
 
 ## Reporting
 
-If you have found this independently, or you are affected and want to report it, contact the
-author through the repository's issue tracker or GitHub profile. Do not open a public issue
-describing the exploit before the vendor has had a reasonable window to ship a fix — that is
-the whole point of responsible disclosure.
+This finding is already public. If you have found the same issue independently, or want to
+report a **different** issue in TP-Link firmware, contact the author through the repository's
+issue tracker or GitHub profile.
 
 **If you are the vendor or a researcher at the vendor:** the report in
 [`REPORT.md`](REPORT.md) is complete enough to reproduce and to fix. The vulnerable code, the
 exact request path, both proof methods, the negative results and the device cleanup record
 are all included. The PoC in `poc/` implements the API handshake from scratch, so it does
-not depend on the router's browser session.
+not depend on the router's browser session. Assigning a CVE for the AXE300's ISP Speed Test
+path would follow the pattern TP-Link already used for the equivalent issues on BE230,
+BE3600, AXE75, AX73 and Deco BE25.
 
 ## Scope and authorisation
 
