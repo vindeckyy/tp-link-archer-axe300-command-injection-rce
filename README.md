@@ -1,5 +1,15 @@
 # TP-Link Archer AXE300 — authenticated command injection (root RCE) in the ISP Speed Test
 
+![TP-Link Archer AXE300 — authenticated command injection leading to root RCE](assets/social-preview.png)
+
+[![CVSS](https://img.shields.io/badge/CVSS-8.5%20High-critical?style=flat-square)](#scoring)
+[![CWE](https://img.shields.io/badge/CWE--78-00599?style=flat-square)](https://cwe.mitre.org/data/definitions/78.html)
+[![Firmware](https://img.shields.io/badge/firmware-1.0.11%20Build%2020241115-informational?style=flat-square)](#am-i-affected)
+[![Platform](https://img.shields.io/badge/platform-Broadcom%20BCM4908%20%2F%20OpenWrt-informational?style=flat-square)](#platform-notes)
+[![Vendor advisory](https://img.shields.io/badge/vendor%20advisory-FAQ%204935-orange?style=flat-square)](https://www.tp-link.com/us/support/faq/4935/)
+[![Disclosed](https://img.shields.io/badge/disclosed-2026--10--24-blue?style=flat-square)](#summary)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+
 **`spdt_server` is concatenated into a shell command string and executed as `root` on the router.**
 
 A remote attacker holding the Archer AXE300's admin web UI credential can send a single HTTP
@@ -238,8 +248,8 @@ login response sets. A client that drops the cookie still gets HTTP 200 — with
 
 ```console
 $ pip install cryptography
-$ git clone https://github.com/vindeckyy/tp-link-axe300-rce-findings.git
-$ cd tp-link-axe300-rce-findings
+$ git clone https://github.com/vindeckyy/tp-link-archer-axe300-command-injection-rce.git
+$ cd tp-link-archer-axe300-command-injection-rce
 $ python3 poc/axe300_spdt_poc.py --host 192.168.0.1 --password '<admin-password>' --sleep 5
 ```
 
@@ -616,6 +626,7 @@ it explains why "free some CPU" is not the lever it appears to be on this hardwa
 | [`evidence/performance-profile.txt`](evidence/performance-profile.txt) | Measured performance profile and the tunables that were changed |
 | [`evidence/device-state-after.txt`](evidence/device-state-after.txt) | Post-cleanup device state, with notes |
 | [`SECURITY.md`](SECURITY.md) | Disclosure status, what to do if you run the affected firmware, and how to report |
+| [`assets/social-preview.png`](assets/social-preview.png) | The advisory banner used as the link-preview card |
 | [`DISCLAIMER.md`](DISCLAIMER.md) | Legal disclaimer and terms of use |
 | [`LICENSE`](LICENSE) | MIT, for the code in this repository |
 
