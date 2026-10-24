@@ -226,6 +226,11 @@ $ cd tp-link-axe300-rce-findings
 $ python3 poc/axe300_spdt_poc.py --host 192.168.0.1 --password '<admin-password>' --sleep 5
 ```
 
+This repository is **private** while the disclosure decision rests with the author, so cloning
+it requires access (or a fork). The PoC itself is a single self-contained file with no
+dependencies beyond `cryptography`, so copying `poc/axe300_spdt_poc.py` out of the repository
+is enough to reproduce everything.
+
 ### PoC options
 
 ```
