@@ -1,20 +1,27 @@
 ===PASSWD
 admin:x:1000:0:admin:/var:/bin/false
-===SHADOW
-root:x:0:0:99999:7:::
-admin:$1$a6ztWKl0$FPRVaByBD.MiRq11v5M/a.:20042:0:99999:7:::
-===DROPB
-drwx------    2 root     root             0 Oct 24 03:31 .
-drwxr-xr-x   37 root     root             0 Oct 24 03:30 ..
--rw-------    1 root     root           421 Nov 15  2024 dropbear_rsa_host_key
-===ROOT
+===ROOTMODE
 drwxr-xr-x    2 root     root             0 Oct 24 03:29 /root
-===HOTPLUG_PAYLOAD_LINES
+===HOTPLUG_PAYLOAD
 0
-===PS
-  527 root      4464 S <  /usr/sbin/dropbear -P /var/run/dropbear.1.pid -p 200
-16431 root      3372 S <  grep dropbea
-===PORTS
+===DROPB_FILES
+dropbear_rsa_host_key
+===LISTEN
 tcp        0      0 0.0.0.0:20001           0.0.0.0:*               LISTEN      
-===WWW_LEFTOVERS
+===LEFTOVERS
+ls: /tmp/axe_check.txt: No such file or directory
+ls: /tmp/t?.txt: No such file or directory
+ls: /tmp/probe.txt: No such file or directory
 ls: /www/poc_check*: No such file or directory
+===PROCS
+2
+
+=== Verification notes
+Taken after all research and cleanup, 2026-10-24, via the injection channel itself.
+* admin passwd entry  : original (uid 1000, group root, /var, shell /bin/false)
+* /root                : mode 755, empty - the tmpfs overlay and injected .ssh are gone
+* hotplug script       : 0 occurrences of the escalation payload
+* /etc/dropbear        : only the vendor host key, no authorized_keys, no keys/ dir
+* listeners            : only the vendor dropbear on 20001, port 22 closed
+* leftover test files  : none (/tmp and /www clean)
+* dropbear processes   : the single vendor instance with its original arguments
