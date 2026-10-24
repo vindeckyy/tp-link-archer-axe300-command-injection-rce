@@ -667,6 +667,18 @@ with the format is shown instead.
 
 ---
 
+## Related research
+
+Other disclosures from the same author, each with a full write-up and a working proof of
+concept:
+
+- **[Apache Log4j — RCE via classpath resources Log4j trusts without asking](https://github.com/vindeckyy/log4j-classpath-plant-rce)** — a planted configuration resource is evaluated at start-up, so the attack lands before any request reaches the application.
+- **[Apache Log4j — RCE via configuration-time evaluation of untrusted Thread Context Map data](https://github.com/vindeckyy/log4j-config-time-lookup-rce)** — lookup on attacker-controlled data executes code during configuration parsing, plus a second impact: secret disclosure with no special configuration needed.
+- **[Apache Log4j — log injection and record corruption](https://github.com/vindeckyy/log4j-log-injection)** — three findings in the logging path itself: structured-data injection, 3.x attribute drift and JSON NaN, live-proven.
+- **[VIZIO SmartCast — unauthenticated LAN JavaScript execution and persistent internal-API control](https://github.com/vindeckyy/smartcast-backdoor)** — a LAN attacker gets code execution on the TV and durable control of its internal API, on hardware that ships a JavaScript app store.
+
+---
+
 ## Acknowledgements
 
 Thanks to the owner of the hardware, who authorised the test and supplied the credential.
