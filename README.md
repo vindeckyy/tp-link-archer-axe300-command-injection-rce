@@ -23,7 +23,8 @@ TP-Link's own command-injection advisory.
 > Published publicly in this repository on **2026-10-24**. This finding has **not** been
 > reported to TP-Link, **not** sent to any vendor, and **not** shared with any third party
 > before that date. No prior disclosure, advisory or CVE exists for this model or this code
-> path.
+> path. The advisory summary is also filed as a pinned issue:
+> [#1 — Authenticated OS command injection (root RCE) in the ISP Speed Test](https://github.com/vindeckyy/tp-link-archer-axe300-command-injection-rce/issues/1).
 >
 > The test was performed on the owner's own hardware with the owner's explicit permission and
 > credentials. The device was returned to its original state afterwards — the verification is
