@@ -1,0 +1,20 @@
+===PASSWD
+admin:x:1000:0:admin:/var:/bin/false
+===SHADOW
+root:x:0:0:99999:7:::
+admin:$1$a6ztWKl0$FPRVaByBD.MiRq11v5M/a.:20042:0:99999:7:::
+===DROPB
+drwx------    2 root     root             0 Oct 24 03:31 .
+drwxr-xr-x   37 root     root             0 Oct 24 03:30 ..
+-rw-------    1 root     root           421 Nov 15  2024 dropbear_rsa_host_key
+===ROOT
+drwxr-xr-x    2 root     root             0 Oct 24 03:29 /root
+===HOTPLUG_PAYLOAD_LINES
+0
+===PS
+  527 root      4464 S <  /usr/sbin/dropbear -P /var/run/dropbear.1.pid -p 200
+16431 root      3372 S <  grep dropbea
+===PORTS
+tcp        0      0 0.0.0.0:20001           0.0.0.0:*               LISTEN      
+===WWW_LEFTOVERS
+ls: /www/poc_check*: No such file or directory

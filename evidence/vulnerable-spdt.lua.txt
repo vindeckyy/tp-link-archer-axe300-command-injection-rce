@@ -1,0 +1,116 @@
+=== Extracted from the device under test ===
+Device : TP-Link Archer AXE300 (AXE16000 Quad-Band Wi-Fi 6E) v1.0
+Firmware: 1.0.11 Build 20241115 rel.76431(5553)
+Path   : /usr/lib/lua/luci/model/spdt.lua
+Collected: 2026-10-24, read from the live device via the RCE described in this repository.
+         This is vendor firmware code, reproduced here as evidence of the vulnerability.
+
+
+--- /usr/lib/lua/luci/model/spdt.lua -----------------------------------------------
+
+    function SPEED_TEST_INST:start_spt(form)
+        local running = check_spt_running()
+        local i,j,k
+        local start_time = 0
+        local spdt_url = ""
+        local host = ""
+        local port = ""
+        local file_name = ""
+        local len
+
+        if running then
+            dbg.print("speed test is running")
+            return start_time
+        end
+
+
+        if form then
+            spdt_url = form.spdt_server            <-- attacker-controlled, unvalidated
+        end
+
+        sys.fork_call("echo " .. spdt_url .. " > /tmp/log/spdt_url")
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        INJECTION SINK: spdt_url is concatenated into a shell command string and
+        executed via /bin/sh -c (sys.fork_call). No quoting, no escaping, no validation.
+        Note that the host/port/file_name parsing below does not protect this call:
+        the fork_call above already ran.
+
+        --url format: http://[host](:port)/[size][unit]
+        --eg: http://ntptsm01.lab.sys.frontiernet.net(:80)/10g
+        --url format: http://[ip](:port)/[size][unit]
+        --eg: http://192.168.137.10(:80)/10g
+        len = string.len(spdt_url)
+        i, _ = string.find(spdt_url, "//")
+        if i == nil then
+            return start_time
+        end
+        j, _ = string.find(spdt_url, ":%d")
+        if j then
+            k, _ = string.find(spdt_url, "%d/")
+            if k then
+                host = string.sub(spdt_url, i+2, j-1)
+                port = string.sub(spdt_url, j+1, k)
+            else
+                return start_time
+            end
+        else
+            k, _ = string.find(spdt_url, "%w/")
+            if k then
+                host = string.sub(spdt_url, i+2, k)
+                port = "80"
+            else
+                return start_time
+            end
+        end
+
+        file_name = string.sub(spdt_url, k+2, len)
+
+        --clear last result record
+        sys.fork_call("echo " .. " > " .. FILE_SPEED_TEST_RESULT_DOWNLOAD)
+        sys.fork_call("echo " .. " > " .. FILE_SPEED_TEST_RESULT_UPLOAD)
+
+        local cmd = SCRIPT_SPEED_TEST
+        if spdt_url and spdt_url ~= "" then
+            cmd = SCRIPT_SPEED_TEST .. " " .. host .. " " .. port .. " " .. file_name
+        else
+            dbg.print("A certain url is not get.")
+            return start_time
+        end
+
+        ...
+
+    end
+
+
+--- /usr/lib/lua/luci/controller/admin/speedtest.lua (dispatch) --------------------
+
+    local dispatch_tbl = {
+        speedtest = {
+            ["read"] = {cb = get_speedtest_info},
+            ["start"] = {cb = start_speedtest},          <-- reachable entry point
+            ["stop"] = {cb = stop_speedtest},
+            ["get"] = {cb = get_speedtest_history},
+            ["clear"] = {cb = clear_speedtest_history},
+            ["get_servers"] = {cb = get_speedtest_servers}
+        }
+    }
+
+
+--- client side, /webpages/modules/isp/speedTest/models.js ------------------------
+
+    t.su.define("startIspSpeedTestProxy", {extend:"IPFProxy",
+        url:t.su.url("/admin/speedtest?form=speedtest"),
+        preventSuccessEvent:!0,
+        writeFilter:function(e){return t.extend({operation:"start"},e)}})
+
+    ... data:{spdt_server:e}   <-- the value that reaches form.spdt_server
+
+
+--- notes ------------------------------------------------------------------------
+
+* The vulnerable fork_call sits BEFORE the host/port parsing, so payloads that the
+  parser would reject still execute. Appending ";sleep 5" or ";id" to a valid URL is
+  enough.
+* The same concatenation pattern in other files under /usr/lib/lua/luci/model/ is the
+  bug class to audit. Every sys.fork_call("..." .. <request data> .. "...") is a
+  variant.

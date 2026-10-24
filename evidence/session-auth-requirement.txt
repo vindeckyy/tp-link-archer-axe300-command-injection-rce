@@ -1,0 +1,123 @@
+=== Extracted from the device under test ===
+Device : TP-Link Archer AXE300 v1.0, firmware 1.0.11 Build 20241115
+Date   : 2026-10-24
+Subject: how a client authenticates to the web API (needed by the proof of concept)
+
+This file records the API handshake the PoC implements. It is the reason a naive
+client gets empty responses back.
+
+
+--- 1. Session cookie, not just the stok -------------------------------------------
+
+POST /cgi-bin/luci/;stok=/login?form=login     ->  200 OK
+Set-Cookie: sysauth=<32-hex session id>;path=/cgi-bin/luci
+
+The stok in the URL is not sufficient. The session is identified by the sysauth
+cookie, which names the session file:
+
+    /usr/lib/lua/luci/dispatcher.lua
+        local sess = ctx.authsession
+        local verifytoken = false
+        if not sess then
+            sess = luci.http.getcookie("sysauth")
+            sess = sess and sess:match("^[a-f0-9]*$")
+            verifytoken = true
+        end
+
+        local sdat = sauth.read(sess)
+        ...
+        elseif ctx.urltoken.stok == sdat.token then
+            local ipaddr = sys.getenv("REMOTE_ADDR")
+            local remote = not ctypes.check_ip_in_lan(ipaddr)
+            if remote == sdat.remote then
+                if remote then
+                    if sdat.addr == ipaddr then
+                        if ctypes.check_safe_request(ctx.request) then
+                            user = sdat.user
+                        else
+                            return error_json("permission denied")
+                        end
+                    end
+                ...
+
+A client that drops the cookie gets HTTP 200 with an empty body ({"data":""}), which
+looks like a protocol error but is simply "no session found".
+
+
+--- 2. Request body encryption and signature ---------------------------------------
+
+Every API request carries two form fields:
+
+    sign=<hex>      RSA (PKCS#1 v1.5, 512-bit key) over the signature string
+    data=<base64>   AES-128-CBC (PKCS#7) of the urlencoded form body
+
+The signature string differs by request type:
+
+    login:    "k=<aes_key>&i=<aes_iv>&h=<hash>&s=<seq+len(data)>"
+    other:    "h=<hash>&s=<seq+len(data)>"
+
+The AES key and IV are only carried in the login signature; the server binds them to
+the session and uses them for every later request.
+
+    /usr/lib/lua/luci/service.lua
+        function analyze_signature(sig, hasaeskey)
+            ...
+            if hasaeskey then
+                aeskey, aesiv, hash, seq = string.match(str, "k=(.-)&i=(.-)&h=(.-)&s=(.+)")
+            else
+                hash, seq = string.match(str, "h=(.-)&s=(.+)")
+            end
+        end
+
+The hash is md5(username .. password):
+
+    /usr/lib/lua/luci/model/accountmgnt.lua
+        function shadow_checked(pwd_str)
+            local password = uci_r:get(ACCCFG, "admin", "password") or nil
+            local shadow = nixio.crypt(pwd_str, password)
+            if shadow == password then ...
+
+On this device the web account is "admin" and the session hash observed was
+<md5 of "admin" + password> = md5("admin" .. <admin password>).
+
+
+--- 3. Sequence number -------------------------------------------------------------
+
+    /usr/lib/lua/luci/service.lua
+        function check_seqnum(seqnum, datalen, islogin)
+            local saved_seqnum = read_seqnum(islogin)
+            if (seqnum - datalen) ~= saved_seqnum then
+                return false
+            end
+            return true
+        end
+
+The sequence number comes from GET/POST /login?form=auth ("seq" in the response) and
+is used unchanged for every request in the session. The router keeps it in
+/tmp/luci-seqnum.
+
+
+--- 4. Session contents (read from the device) --------------------------------------
+
+    ["hash"]   = "<md5 of "admin" + password>"
+    ["user"]   = "admin"
+    ["aesiv"]  = "<aes iv>"
+    ["secret"] = "<32-hex session secret>"
+    ["addr"]   = "<client MAC>"     (client MAC)
+    ["token"]  = "<32-hex stok>"   (the stok)
+    ["atime"]  = 316710
+    ["seqnum"] = <session seqnum>
+    ["aeskey"] = "<aes key>"
+
+The session file name is a separate 32-hex id; the stok is carried inside as "token".
+Note that the session stores the client address, so a session is bound to one client.
+
+
+--- 5. Account lockout --------------------------------------------------------------
+
+A failed login returns:
+
+    {"errorcode":"login failed","success":false,"data":{"failureCount":3,"attemptsAllowed":7}}
+
+The router locks the account after repeated failures. Do not loop the PoC against a
+router you depend on.
