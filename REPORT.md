@@ -1,9 +1,6 @@
 # Archer AXE300 — Authenticated Remote Code Execution (CVE-class: command injection)
 
-> **Disclosure status.** This finding has **not** been reported to TP-Link, **not** sent to any
-> vendor, **not** shared with any third party, and **not** published in an advisory, mailing list
-> post, blog, conference talk, preprint, issue tracker, or chat anywhere else. No prior disclosure
-> exists. The test was performed on the owner's own hardware with the owner's explicit permission
+> **Disclosure status.** Published publicly in this repository on **2026-10-24**, before the vendor was notified. Reported to TP-Link's Product Security Team at security@tp-link.com on **2026-10-26**. As of this update, TP-Link has published no fix, advisory, or CVE for this finding. The test was performed on the owner's own hardware with the owner's explicit permission
 > and credentials, and the device was returned to its original state afterwards (§6).
 
 **Target:** `http://192.168.0.1/` — TP-Link Archer AXE300 (AXE16000 Quad-Band Wi-Fi 6E), hardware v1.0

@@ -2,10 +2,7 @@
 
 ## Status of this finding
 
-Published publicly in this repository on **2026-10-24**. Before that date the finding had
-**not** been reported to TP-Link, **not** sent to any vendor, and **not** shared with any
-third party. No advisory, mailing list post, blog, conference talk, preprint or issue existed
-for it, and no prior disclosure is known.
+Published publicly in this repository on **2026-10-24**, before the vendor was notified. Reported to TP-Link's Product Security Team at security@tp-link.com on **2026-10-26**. As of this update, TP-Link has published no fix, advisory, or CVE for this finding.
 
 The Archer AXE300 does not appear in TP-Link's own command-injection advisory
 ([FAQ 4935](https://www.tp-link.com/us/support/faq/4935/)), and no CVE covers this model or
@@ -33,7 +30,7 @@ Until a firmware update is available:
 
 ## Reporting
 
-This finding is already public. If you have found the same issue independently, or want to
+This finding is already public and has been reported to TP-Link. If you have found the same issue independently, or want to
 report a **different** issue in TP-Link firmware, contact the author through the repository's
 issue tracker or GitHub profile.
 

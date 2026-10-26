@@ -20,10 +20,7 @@ flaw is CWE-78 (OS command injection) in the vendor's LuCI model layer, present 
 TP-Link's own command-injection advisory.
 
 > **Disclosure status.**
-> Published publicly in this repository on **2026-10-24**. This finding has **not** been
-> reported to TP-Link, **not** sent to any vendor, and **not** shared with any third party
-> before that date. No prior disclosure, advisory or CVE exists for this model or this code
-> path. The advisory summary is also filed as a pinned issue:
+> Published publicly in this repository on **2026-10-24**, before the vendor was notified. The finding was then reported to TP-Link's Product Security Team at security@tp-link.com on **2026-10-26**. As of this update, TP-Link has published no fix, advisory, or CVE for this model or code path. The advisory summary is also filed as a pinned issue:
 > [#1 — Authenticated OS command injection (root RCE) in the ISP Speed Test](https://github.com/vindeckyy/tp-link-archer-axe300-command-injection-rce/issues/1).
 >
 > The test was performed on the owner's own hardware with the owner's explicit permission and
@@ -360,10 +357,7 @@ CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H
 CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:N/VC:H/VI:H/VA:H/SC:L/SI:L/SA:L
 ```
 
-This is the same vector TP-Link itself publishes for the authenticated command-injection
-family in [FAQ 4935](https://www.tp-link.com/us/support/faq/4935/), including
-[CVE-2026-22226](https://nvd.nist.gov/vuln/detail/CVE-2026-22226), whose CVSS 3.1 vector and
-score (`AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H`, 7.2 High) are identical to the ones above.
+TP-Link's advisory, [FAQ 4935](https://www.tp-link.com/us/support/faq/4935/), scores the same authenticated command-injection family at CVSS 4.0 8.5 with `CVSS:4.0/AV:A/AC:L/AT:N/PR:H/UI:N/VC:H/VI:H/VA:H/SC:L/SI:L/SA:L`. The exception is CVE-2026-22229, which uses `AV:N` and scores 8.6. This report uses `AV:N` because the admin interface is reachable over IP, so attack vector is the only metric that differs from the family vector. FAQ 4935 publishes CVSS 4.0 values only, so this report makes no CVSS 3.1 comparison with [CVE-2026-22226](https://nvd.nist.gov/vuln/detail/CVE-2026-22226).
 
 The base score reflects the credential requirement. The practical severity is higher, because
 the affected device is the gateway for every host on the network, so the compromise is not
@@ -554,13 +548,10 @@ V1. The vulnerable code path is the same `sys.fork_call` pattern found across th
 model layer. No fixed firmware exists for this model.
 
 **Has TP-Link been notified?**
-Not as of publication. No advisory, CVE or third-party report exists for this model or code
-path. TP-Link's own advisory for the equivalent class on other models is FAQ 4935.
+Yes. The repository was published on 2026-10-24, before the vendor was notified. The report was then sent to TP-Link's Product Security Team at security@tp-link.com on 2026-10-26. TP-Link's own advisory for the equivalent class on other models is FAQ 4935.
 
 **Is there a CVE for this?**
-Not yet. This issue is not in the NVD, and the AXE300 is absent from TP-Link's advisory list.
-If you work at TP-Link and want a CVE assigned, the reproduction in [`REPORT.md`](REPORT.md)
-is complete.
+Not as of this update. No CVE has been assigned or published, and the AXE300 is absent from TP-Link's advisory list. The report asks TP-Link whether it will assign one. The reproduction in [`REPORT.md`](REPORT.md) is complete.
 
 **How do I check whether my device is vulnerable without exploiting it?**
 Open **Advanced → Network → Internet → Speed Test** and read the request in your browser's
